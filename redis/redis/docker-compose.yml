@@ -1,0 +1,94 @@
+services:
+  redis-master:
+    image: redis
+    container_name: redis-master
+    ports:
+      - "6379:6379"
+    command: redis-server
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.2
+
+  redis-slave1:
+    image: redis
+    container_name: redis-slave1
+    ports:
+      - "6380:6379"
+    command: redis-server --slaveof 10.5.0.2 6379
+    depends_on: 
+      - redis-master
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.3
+
+  redis-slave2:
+    image: redis
+    container_name: redis-slave2
+    ports:
+      - "6381:6379"
+    command: redis-server --slaveof 10.5.0.2 6379
+    depends_on: 
+      - redis-master
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.4
+
+  redis-sentinel-1:
+    image: redis
+    container_name: redis-sentinel-1
+    ports:
+      - "6382:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on: 
+      - redis-master
+      - redis-slave1
+      - redis-slave2
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.5
+
+  redis-sentinel-2:
+    image: redis
+    container_name: redis-sentinel-2
+    ports:
+      - "6384:26379"
+    volumes:
+      - ./sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    depends_on: 
+      - redis-master
+      - redis-slave1
+      - redis-slave2
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.6
+
+  api:
+    build: ./api
+    environment:
+      spring.data.redis.sentinels: 10.5.0.5:26379,10.5.0.6:26379
+      spring.data.redis.sentinels.master: mymaster
+      spring_cache_type: redis
+      springdoc_api-docs_enabled: true
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      redis-network:
+        ipv4_address: 10.5.0.7
+    depends_on: 
+      - redis-sentinel-1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO - http://localhost:8080/api/intermon/health | grep '\"status\":\"UP\"' || exit 1"]
+      interval: 60s
+      timeout: 3s
+
+networks:
+  redis-network:
+    driver: bridge
+    ipam:
+     config:
+       - subnet: 10.5.0.0/16
+         gateway: 10.5.0.1
